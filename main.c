@@ -22,21 +22,52 @@ void vApplicationIdleHook(void)
 
 static void echo_task(void *argument)
 {
+    char line[128];
+    unsigned int length = 0;
+    int previous_cr = 0;
+
     (void)argument;
     uart_puts("Waiting For Notification - Blocked...\r\n");
     for (;;) {
         int value = uart_getc();
-        int printable = value >= ' ' && value <= '~';
 
-        if (printable || value == '\r' || value == '\n') {
+        if (value >= 0) {
             taskENTER_CRITICAL();
-            uart_puts("You entered: \"");
-            if (printable)
-                uart_putc(value);
-            uart_puts("\"\r\nUnblocked\r\nWaiting For Notification - Blocked...\r\n");
+            if (value == '\n' && previous_cr) {
+                previous_cr = 0;
+            } else {
+                previous_cr = value == '\r';
+                if (value == '\r' || value == '\n') {
+                    line[length] = '\0';
+                    uart_puts("\r\nYou entered: \"");
+                    uart_puts(line);
+                    uart_puts("\"\r\nUnblocked\r\nWaiting For Notification - Blocked...\r\n");
+                    length = 0;
+                } else if (value == '\b' || value == 0x7f) {
+                    if (length > 0) {
+                        --length;
+                        uart_puts("\b \b");
+                    }
+                } else if (value >= ' ' && value <= '~' &&
+                           length < sizeof(line) - 1) {
+                    line[length++] = value;
+                    uart_putc(value);
+                }
+            }
             taskEXIT_CRITICAL();
         }
         vTaskDelay(1);
+    }
+}
+
+static void task1(void *argument)
+{
+    (void)argument;
+    for (;;) {
+        taskENTER_CRITICAL();
+        uart_puts("Task1\r\n");
+        taskEXIT_CRITICAL();
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
 
@@ -57,6 +88,7 @@ int main(void)
 {
     uart_puts("FreeRTOS " tskKERNEL_VERSION_NUMBER " on QEMU virt\r\n");
     configASSERT(xTaskCreate(echo_task, "echo", 512, NULL, 2, NULL) == pdPASS);
+    configASSERT(xTaskCreate(task1, "task1", 512, NULL, 1, NULL) == pdPASS);
     configASSERT(xTaskCreate(periodic_task, "periodic", 512, NULL, 1, NULL) == pdPASS);
     vTaskStartScheduler();
     vPlatformAssert("scheduler returned", 0);
